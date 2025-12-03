@@ -22,20 +22,18 @@ const componentContent = fs.readFileSync(COMPONENT_PATH, "utf-8");
 const registryItem = {
   name: COMPONENT_NAME,
   type: "registry:ui",
-  dependencies: [
-    "@vueuse/core", // Add any npm dependencies your component needs here
-  ],
-  registryDependencies: [
-    // If your component uses Button or Card, list them here:
-    // "button",
-    // "card"
-  ],
+  dependencies: ["@vueuse/core"],
   files: [
     {
-      path: `ui/${COMPONENT_NAME}/index.vue`, // Where it goes in the user's project
+      // 1. Change path to just "folder/file" (No "ui/" prefix)
+      // This will result in: src/components/ui/wheel-picker/index.vue
+      path: `${COMPONENT_NAME}/index.vue`,
+
       content: componentContent,
       type: "registry:ui",
-      target: `components/ui/${COMPONENT_NAME}/index.vue`,
+
+      // 2. DELETE THE TARGET LINE COMPLETELY
+      // target: `components/ui/${COMPONENT_NAME}/index.vue` <--- DELETE THIS
     },
   ],
 };
