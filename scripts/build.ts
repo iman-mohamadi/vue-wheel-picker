@@ -11,7 +11,7 @@ const COMPONENT_PATH = path.join(
   "../src/components/WheelPicker.vue"
 );
 const TYPES_PATH = path.join(__dirname, "../src/components/types.ts"); // If you separated types
-const OUTPUT_DIR = path.join(__dirname, "../public/registry");
+const OUTPUT_DIR = path.join(__dirname, "../docs/registry");
 
 // 2. Read Source Files
 const componentContent = fs.readFileSync(COMPONENT_PATH, "utf-8");
