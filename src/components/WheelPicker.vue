@@ -17,6 +17,7 @@ const props = withDefaults(defineProps<{
   scrollSensitivity?: number;
   itemHeight?: number;
   class?: string;
+  overlayClass?: string;
 }>(), {
   options: () => [],
   infinite: false,
@@ -30,7 +31,7 @@ const emit = defineEmits<{
   (e: 'update:modelValue', value: T): void;
 }>();
 
-// --- 1. Option Gathering (Support for Props OR Children) ---
+// --- 1. Option Gathering ---
 const childOptions = ref<WheelPickerOption<T>[]>([]);
 provide('wheel-picker-register', (option: WheelPickerOption<T>) => {
   childOptions.value.push(option);
@@ -38,19 +39,24 @@ provide('wheel-picker-register', (option: WheelPickerOption<T>) => {
 
 const optionsProp = computed(() => (props.options && props.options.length > 0) ? props.options : childOptions.value);
 
-// --- 2. Data Padding (React "options" useMemo Logic) ---
+// --- 2. Enhanced Data Padding ---
 const options = computed(() => {
   if (!props.infinite) return optionsProp.value;
   
   const result = [];
-  const halfCount = Math.ceil(props.visibleCount / 2);
+  // FIX: React used 'halfCount' but that leaves gaps for lists like Hours (12 items vs 20 slots).
+  // We use 'visibleCount' to ensure the cylinder is fully populated for smooth rotation.
+  const paddingCount = props.visibleCount; 
   
   if (optionsProp.value.length === 0) return result;
 
-  // Clone options until we have enough to fill the half-circle
-  while (result.length < halfCount) {
+  // Clone options until we have enough to fill the cylinder
+  while (result.length < paddingCount) {
     result.push(...optionsProp.value);
   }
+  // Ensure we add one more batch to allow safe wrapping
+  result.push(...optionsProp.value);
+  
   return result;
 });
 
@@ -66,12 +72,11 @@ const measurements = computed(() => {
   return { height, halfItemHeight: height * 0.5, itemAngle, radius, containerHeight, quarterCount };
 });
 
-// --- 4. Visual Padding (React "renderWheelItems" Logic) ---
+// --- 4. Visual Padding ---
 const displayItems = computed(() => {
   const { itemAngle, quarterCount } = measurements.value;
   const src = options.value;
   
-  // Base mapping
   const items = src.map((item, index) => ({
     ...item,
     _index: index,
@@ -80,17 +85,15 @@ const displayItems = computed(() => {
 
   if (props.infinite && src.length > 0) {
     for (let i = 0; i < quarterCount; ++i) {
-      // Prepend
       const prependIndex = -i - 1;
       items.unshift({
-        ...src[src.length - i - 1], // Fixed index logic to match React
+        ...src[src.length - 1 - (i % src.length)],
         _index: prependIndex,
         angle: itemAngle * (i + 1)
       });
-      // Append
       const appendIndex = i + src.length;
       items.push({
-        ...src[i],
+        ...src[i % src.length],
         _index: appendIndex,
         angle: -itemAngle * appendIndex
       });
@@ -121,11 +124,10 @@ const wheelSegmentPositions = computed(() => {
   return segments;
 });
 
-// --- 5. Physics State (Non-Reactive "Refs") ---
+// --- 5. Physics State ---
 const containerRef = ref<HTMLElement | null>(null);
 const wheelItemsRef = ref<HTMLElement | null>(null);
 const highlightListRef = ref<HTMLElement | null>(null);
-
 const localValue = ref<T>(props.modelValue ?? props.defaultValue ?? (optionsProp.value[0]?.value as T));
 
 let scrollRef = 0;
@@ -133,15 +135,9 @@ let moveId = 0;
 let isDragging = false;
 let lastWheelTime = 0;
 let dragController: AbortController | null = null;
+const touchData = { startY: 0, yList: [] as [number, number][], touchScroll: 0, isClick: true };
 
-const touchData = { 
-  startY: 0, 
-  yList: [] as [number, number][], 
-  touchScroll: 0, 
-  isClick: true 
-};
-
-// --- 6. Core Logic (Exact Port) ---
+// --- 6. Core Logic ---
 const RESISTANCE = 0.3;
 const MAX_VELOCITY = 30;
 const easeOutCubic = (p: number) => Math.pow(p - 1, 3) + 1;
@@ -157,21 +153,29 @@ const scrollTo = (scroll: number) => {
   const { radius, itemAngle, quarterCount, height } = measurements.value;
   const normalizedScroll = props.infinite ? normalizeScroll(scroll) : scroll;
 
-  // 3D Transform
   if (wheelItemsRef.value) {
     wheelItemsRef.value.style.transform = `translateZ(${-radius}px) rotateX(${itemAngle * normalizedScroll}deg)`;
     
-    // Visibility Culling (Manual DOM access for speed)
+    // Manual DOM Visibility (Performance optimized)
     const children = wheelItemsRef.value.children;
     for (let i = 0; i < children.length; i++) {
       const li = children[i] as HTMLElement;
-      const idx = parseFloat(li.dataset.index || '0');
+      // Safety check for dataset
+      if (!li.dataset.index) continue;
+      
+      const idx = parseFloat(li.dataset.index);
       const distance = Math.abs(idx - normalizedScroll);
-      li.style.visibility = distance > quarterCount ? "hidden" : "visible";
+      
+      // We manually toggle visibility. 
+      // Because we moved 'visibility: hidden' to CSS class, Vue won't fight us here.
+      if (distance > quarterCount) {
+        li.style.visibility = "hidden";
+      } else {
+        li.style.visibility = "visible";
+      }
     }
   }
 
-  // Highlight Transform
   if (highlightListRef.value) {
     highlightListRef.value.style.transform = `translateY(${-normalizedScroll * height}px)`;
   }
@@ -227,7 +231,7 @@ const selectByValue = (val: T) => {
   }
 };
 
-// --- 7. Interactions (Drag/Touch) ---
+// --- 7. Interactions ---
 const scrollByStep = (step: number) => {
   const start = scrollRef;
   let end = start + step;
@@ -245,23 +249,19 @@ const scrollByStep = (step: number) => {
 const updateScrollDuringDrag = (e: MouseEvent | TouchEvent) => {
   const y = (e instanceof MouseEvent ? e.clientY : e.touches?.[0]?.clientY) || 0;
   const { startY, yList } = touchData;
-  
   if (touchData.isClick && Math.abs(y - startY) > 5) touchData.isClick = false;
-  
   touchData.yList.push([y, Date.now()]);
   if (touchData.yList.length > 5) touchData.yList.shift();
   
   const delta = (startY - y) / props.itemHeight;
   let next = scrollRef + delta;
   
-  if (props.infinite) {
-    next = normalizeScroll(next);
-  } else {
+  if (props.infinite) next = normalizeScroll(next);
+  else {
     const max = options.value.length;
     if (next < 0) next *= RESISTANCE;
     else if (next > max) next = max + (next - max) * RESISTANCE;
   }
-  
   touchData.touchScroll = scrollTo(next);
 };
 
@@ -298,7 +298,6 @@ const handleDragStart = (e: MouseEvent | TouchEvent) => {
       return;
     }
     
-    // Inertia
     let vel = 0;
     const { yList } = touchData;
     if (yList.length > 1) {
@@ -311,7 +310,6 @@ const handleDragStart = (e: MouseEvent | TouchEvent) => {
         vel = Math.min(Math.abs(v), MAX_VELOCITY) * Math.sign(v);
       }
     }
-    
     scrollRef = touchData.touchScroll;
     decelerateAndAnimateScroll(vel);
   };
@@ -343,7 +341,6 @@ const decelerateAndAnimateScroll = (velocity: number) => {
     const dist = velocity * duration + 0.5 * (velocity > 0 ? -decel : decel) * duration ** 2;
     end = Math.round(start + dist);
   } else {
-    // Logic for boundary snapping
     if (start < 0 || start > len - 1) {
       end = clamp(start, 0, len - 1);
       duration = Math.sqrt(Math.abs(start - end) / 10);
@@ -355,7 +352,6 @@ const decelerateAndAnimateScroll = (velocity: number) => {
       duration = Math.sqrt(Math.abs(end - start) / decel);
     }
   }
-  
   animateScroll(start, end, duration, () => selectByScroll(scrollRef));
 };
 
@@ -368,6 +364,7 @@ const handleWheel = (e: WheelEvent) => {
 };
 
 watch(() => props.modelValue, (v) => { if(v !== undefined && v !== localValue.value) { localValue.value = v; selectByValue(v); }});
+
 onMounted(() => {
   nextTick(() => selectByValue(localValue.value));
   const el = containerRef.value;
@@ -377,6 +374,7 @@ onMounted(() => {
     el.addEventListener('wheel', handleWheel, { passive: false });
   }
 });
+
 onUnmounted(() => {
   const el = containerRef.value;
   if(el) {
@@ -389,9 +387,7 @@ onUnmounted(() => {
 
 <template>
   <div ref="containerRef" :class="cn($props.class)" :style="{ height: `${measurements.containerHeight}px` }" data-rwp>
-    
     <slot />
-
     <ul ref="wheelItemsRef" data-rwp-options>
       <li 
         v-for="item in displayItems" 
@@ -403,7 +399,6 @@ onUnmounted(() => {
           height: `${measurements.height}px`,
           lineHeight: `${measurements.height}px`,
           transform: `rotateX(${item.angle}deg) translateZ(${measurements.radius}px)`,
-          visibility: 'hidden'
         }"
       >
         {{ item.label }}
@@ -448,7 +443,7 @@ onUnmounted(() => {
   transform: translateY(-50%);
   font-size: 1rem;
   font-weight: 500;
-  pointer-events: none; /* crucial so clicks pass through to container */
+  pointer-events: none;
 }
 
 [data-rwp-highlight-list] {
@@ -476,6 +471,8 @@ onUnmounted(() => {
   left: 0;
   width: 100%;
   -webkit-font-smoothing: subpixel-antialiased;
+  /* FIX: Default state is hidden in CSS, so Vue doesn't override it. JS toggles it to visible. */
+  visibility: hidden;
   will-change: visibility;
   font-size: 0.875rem;
 }
