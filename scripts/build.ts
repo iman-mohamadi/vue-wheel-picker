@@ -11,14 +11,20 @@ const COMPONENT_PATH = path.join(
   "../src/components/WheelPicker.vue"
 );
 const ITEM_PATH = path.join(__dirname, "../src/components/WheelPickerItem.vue");
+const WRAPPER_PATH = path.join(
+  __dirname,
+  "../src/components/WheelPickerWrapper.vue"
+);
 
 // 2. Read Source Files
+const wrapperContent = fs.readFileSync(WRAPPER_PATH, "utf-8");
 const componentContent = fs.readFileSync(COMPONENT_PATH, "utf-8");
 const itemContent = fs.readFileSync(ITEM_PATH, "utf-8");
 
 // 3. Define the 'index.ts' content manually
 const indexContent = `export { default as WheelPicker } from './WheelPicker.vue'
 export { default as WheelPickerItem } from './WheelPickerItem.vue'
+export { default as WheelPickerWrapper } from './WheelPickerWrapper.vue'
 export type { WheelPickerOption } from './WheelPicker.vue'
 `;
 
@@ -36,6 +42,11 @@ const registryItem = {
     {
       path: `${COMPONENT_NAME}/WheelPickerItem.vue`,
       content: itemContent,
+      type: "registry:ui",
+    },
+    {
+      path: `${COMPONENT_NAME}/WheelPickerWrapper.vue`,
+      content: wrapperContent,
       type: "registry:ui",
     },
     {
